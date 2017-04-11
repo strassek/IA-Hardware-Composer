@@ -24,6 +24,8 @@
 
 namespace hwcomposer {
 
+bool vk_is_supported();
+
 VkFormat DrmToVkFormat(int drm_format);
 VkFormat GbmToVkFormat(int gbm_format);
 

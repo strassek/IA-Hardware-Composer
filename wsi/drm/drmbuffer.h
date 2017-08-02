@@ -60,7 +60,7 @@ class DrmBuffer : public OverlayBuffer {
     return fb_id_;
   }
 
-  struct vk_import ImportImage(VkDevice dev) override;
+  struct vk_import ImportImage(VkInstance inst, VkPhysicalDevice phys_dev, VkDevice dev, VkImageUsageFlags usage) override;
   EGLImageKHR ImportImage(EGLDisplay egl_display) override;
 
   bool CreateFrameBuffer(uint32_t gpu_fd) override;

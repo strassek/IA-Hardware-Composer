@@ -26,10 +26,12 @@ bool NativeVKResource::PrepareResources(
 
   Reset();
   context_ = global_context_;
+  VkInstance inst = context_->getInstance();
   VkDevice dev = context_->getDevice();
+  VkPhysicalDevice phys_dev = context_->getPhysicalDevice();
 
   for (auto& layer : layers) {
-    struct vk_import import = layer.GetBuffer()->ImportImage(dev);
+    struct vk_import import = layer.GetBuffer()->ImportImage(inst, phys_dev, dev, VK_IMAGE_USAGE_SAMPLED_BIT);
     if (import.res != VK_SUCCESS) {
       ETRACE("Failed to make import image (%d)\n", import.res);
       return false;

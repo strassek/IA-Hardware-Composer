@@ -54,11 +54,12 @@ bool VKContext::Init() {
 
   VkApplicationInfo app_info = {};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  app_info.apiVersion = VK_MAKE_VERSION(1, 0, 0);
+  app_info.apiVersion = VK_MAKE_VERSION(1, 0, 57);
 
   const char *enabled_layers[] = {};
-  const char *instance_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME};
-  const char *device_extensions[] = {};
+  const char *instance_extensions[] = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+  const char *device_extensions[] = {VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+                                     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
 
   VkInstanceCreateInfo instance_create = {};
   instance_create.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

@@ -39,10 +39,12 @@ bool VKSurface::InitializeGPUResources() {
   VkResult res;
 
   context_ = global_context_;
+  VkInstance inst = context_->getInstance();
   VkDevice dev = context_->getDevice();
+  VkPhysicalDevice phys_dev = context_->getPhysicalDevice();
   VkRenderPass render_pass = context_->getRenderPass();
 
-  struct vk_import import = layer_.GetBuffer()->ImportImage(dev);
+  struct vk_import import = layer_.GetBuffer()->ImportImage(inst, phys_dev, dev, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
   if (import.res != VK_SUCCESS) {
     ETRACE("Failed to make import image (%d)\n", import.res);
     return false;

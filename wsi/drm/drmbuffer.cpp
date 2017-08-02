@@ -81,14 +81,14 @@ void DrmBuffer::InitializeFromNativeHandle(
   Initialize(bo);
 }
 
-struct vk_import DrmBuffer::ImportImage(VkDevice dev) {
+struct vk_import DrmBuffer::ImportImage(VkInstance inst, VkPhysicalDevice phys_dev, VkDevice dev, VkImageUsageFlags usage) {
   struct vk_import import;
 
-  PFN_vkCreateDmaBufImageINTEL vkCreateDmaBufImageINTEL =
-      (PFN_vkCreateDmaBufImageINTEL)vkGetDeviceProcAddr(
-          dev, "vkCreateDmaBufImageINTEL");
-  if (vkCreateDmaBufImageINTEL == NULL) {
-    ETRACE("vkGetDeviceProcAddr(\"vkCreateDmaBufImageINTEL\") failed\n");
+  PFN_vkGetPhysicalDeviceImageFormatProperties2KHR vkGetPhysicalDeviceImageFormatProperties2KHR =
+    (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR)vkGetInstanceProcAddr(
+      inst, "vkGetPhysicalDeviceImageFormatProperties2KHR");
+  if (vkGetPhysicalDeviceImageFormatProperties2KHR == NULL) {
+    ETRACE("vkGetInstanceProcAddr(\"vkGetPhysicalDeviceImageFormatProperties2KHR\") failed\n");
     import.res = VK_ERROR_INITIALIZATION_FAILED;
     return import;
   }
@@ -100,21 +100,103 @@ struct vk_import DrmBuffer::ImportImage(VkDevice dev) {
     return import;
   }
 
+  VkPhysicalDeviceExternalImageFormatInfoKHR phys_ext_image_format = {};
+  phys_ext_image_format.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO_KHR;
+  phys_ext_image_format.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+
+  VkPhysicalDeviceImageFormatInfo2KHR phys_image_format = {};
+  phys_image_format.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2_KHR;
+  phys_image_format.pNext = &phys_ext_image_format;
+  phys_image_format.format = vk_format;
+  phys_image_format.type = VK_IMAGE_TYPE_2D;
+  phys_image_format.tiling = VK_IMAGE_TILING_OPTIMAL;
+  phys_image_format.usage = usage;
+
+  VkExternalImageFormatPropertiesKHR ext_image_format_props = {};
+  ext_image_format_props.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES_KHR;
+
+  VkImageFormatProperties2KHR image_format_props = {};
+  image_format_props.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2_KHR;
+  image_format_props.pNext = &ext_image_format_props;
+
+  import.res = vkGetPhysicalDeviceImageFormatProperties2KHR(phys_dev, &phys_image_format, &image_format_props);
+  if (import.res != VK_SUCCESS) {
+    ETRACE("vkGetPhysicalDeviceImageFormatProperties2KHR failed\n");
+    return import;
+  }
+
+  if (!(ext_image_format_props.externalMemoryProperties.externalMemoryFeatures &
+        VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT_KHR)) {
+    ETRACE("Image format not supported for import to Vulkan\n");
+    import.res = VK_ERROR_FORMAT_NOT_SUPPORTED;
+    return import;
+  }
+
   VkExtent3D image_extent = {};
   image_extent.width = width_;
   image_extent.height = height_;
   image_extent.depth = 1;
 
-  VkDmaBufImageCreateInfo image_create = {};
-  image_create.sType =
-      (enum VkStructureType)VK_STRUCTURE_TYPE_DMA_BUF_IMAGE_CREATE_INFO_INTEL;
-  image_create.fd = static_cast<int>(prime_fd_);
+  uint32_t queue_index = 0;
+
+  VkExternalMemoryImageCreateInfoKHR ext_mem_img_create = {};
+  ext_mem_img_create.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR;
+  ext_mem_img_create.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+
+  VkImageCreateInfo image_create = {};
+  image_create.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_create.pNext = &ext_mem_img_create;
+  image_create.imageType = VK_IMAGE_TYPE_2D;
   image_create.format = vk_format;
   image_create.extent = image_extent;
-  image_create.strideInBytes = pitches_[0];
+  image_create.mipLevels = 1;
+  image_create.arrayLayers = 1;
+  image_create.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_create.tiling = VK_IMAGE_TILING_OPTIMAL;
+  image_create.usage = usage;
+  image_create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  image_create.queueFamilyIndexCount = 1;
+  image_create.pQueueFamilyIndices = &queue_index;
+  image_create.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-  import.res = vkCreateDmaBufImageINTEL(dev, &image_create, NULL,
-                                        &import.memory, &import.image);
+  import.res = vkCreateImage(dev, &image_create, NULL, &import.image);
+  if (import.res != VK_SUCCESS) {
+    ETRACE("vkCreateImage failed\n");
+    return import;
+  }
+
+  VkMemoryRequirements mem_reqs;
+  vkGetImageMemoryRequirements(dev, import.image, &mem_reqs);
+
+  VkImportMemoryFdInfoKHR import_mem_info = {};
+  import_mem_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+  import_mem_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+  import_mem_info.fd = static_cast<int>(prime_fd_);
+
+  uint32_t mem_type_index = ffs(mem_reqs.memoryTypeBits) - 1;
+
+  VkMemoryAllocateInfo alloc_info = {};
+  alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc_info.pNext = &import_mem_info;
+  alloc_info.allocationSize = mem_reqs.size;
+  alloc_info.memoryTypeIndex = mem_type_index;
+
+  import.res = vkAllocateMemory(dev, &alloc_info, NULL, &import.memory);
+  if (import.res != VK_SUCCESS) {
+    ETRACE("vkAllocateMemory failed\n");
+    return import;
+  }
+
+  if (!(mem_reqs.memoryTypeBits & (1 << mem_type_index))) {
+    ETRACE("VkImage and dma_buf have incompatible VkMemoryTypes\n");
+    import.res = VK_ERROR_FORMAT_NOT_SUPPORTED;
+    return import;
+  }
+
+  import.res = vkBindImageMemory(dev, import.image, import.memory, 0);
+  if (import.res != VK_SUCCESS) {
+    ETRACE("vkBindImageMemory failed\n");
+  }
 
   return import;
 }
